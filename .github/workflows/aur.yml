@@ -22,8 +22,24 @@ jobs:
               repo: 'wireguard-gui'
             });
             const fs = require('fs');
+
+            let version = res.data.tag_name.replace(/^v/, '');
+            version = version.replace(/-stable$/i, '');
+            version = version.replace(/-.*$/, '');
+
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${res.data.tag_name}\n`);
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${res.data.tag_name.replace(/^v/, '')}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+
+            const appImageAsset = res.data.assets.find(asset => 
+              asset.name.endsWith('.AppImage') && 
+              (asset.name.includes('x86_64') || asset.name.includes('amd64') || !asset.name.includes('arm'))
+            );
+
+            if (appImageAsset) {
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, `download_url=${appImageAsset.browser_download_url}\n`);
+            } else {
+              core.setFailed('No x86_64 AppImage found in release');
+            }
       - name: Check if update is needed
         id: check_update
         run: |
@@ -36,16 +52,14 @@ jobs:
             exit 0
           fi
           echo "update_needed=true" >> $GITHUB_OUTPUT
-      - name: Download AppImages and calculate sha256sums
+      - name: Download AppImage and calculate sha256sum
         if: steps.check_update.outputs.update_needed == 'true'
         run: |
           VERSION=${{ steps.get_release.outputs.version }}
-          wget -O Dataflare-x86_64.AppImage https://assets.dataflare.app/release/linux/x86_64/Dataflare.AppImage
-          wget -O Dataflare-aarch64.AppImage https://assets.dataflare.app/release/linux/aarch64/Dataflare.AppImage
-          SHA_X86_64=$(sha256sum Dataflare-x86_64.AppImage | awk '{print $1}')
-          SHA_AARCH64=$(sha256sum Dataflare-aarch64.AppImage | awk '{print $1}')
+          wget -O wireguard-gui.AppImage "${{ steps.get_release.outputs.download_url }}"
+          SHA_X86_64=$(sha256sum wireguard-gui.AppImage | awk '{print $1}')
           echo "SHA_X86_64=$SHA_X86_64" >> $GITHUB_ENV
-          echo "SHA_AARCH64=$SHA_AARCH64" >> $GITHUB_ENV
+          echo "Downloaded AppImage SHA256: $SHA_X86_64"
       - name: Update PKGBUILD and .SRCINFO
         if: steps.check_update.outputs.update_needed == 'true'
         run: |
@@ -54,12 +68,10 @@ jobs:
           # Update PKGBUILD
           sed -i "s/^pkgver=.*/pkgver=$VERSION/" PKGBUILD
           sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('$SHA_X86_64')/" PKGBUILD
-          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('$SHA_AARCH64')/" PKGBUILD
 
           # Update .SRCINFO
           sed -i "s/^[[:space:]]*pkgver = .*/\tpkgver = $VERSION/" .SRCINFO
           sed -i "s/^[[:space:]]*sha256sums_x86_64 = .*/\tsha256sums_x86_64 = $SHA_X86_64/" .SRCINFO
-          sed -i "s/^[[:space:]]*sha256sums_aarch64 = .*/\tsha256sums_aarch64 = $SHA_AARCH64/" .SRCINFO
       - name: Commit and push to AUR
         if: steps.check_update.outputs.update_needed == 'true'
         uses: webfactory/ssh-agent@v0.7.0
