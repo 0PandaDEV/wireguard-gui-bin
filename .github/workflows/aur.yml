@@ -60,6 +60,7 @@ jobs:
           SHA_X86_64=$(sha256sum wireguard-gui.AppImage | awk '{print $1}')
           echo "SHA_X86_64=$SHA_X86_64" >> $GITHUB_ENV
           echo "Downloaded AppImage SHA256: $SHA_X86_64"
+          rm wireguard-gui.AppImage
       - name: Update PKGBUILD and .SRCINFO
         if: steps.check_update.outputs.update_needed == 'true'
         run: |
